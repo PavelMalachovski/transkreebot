@@ -4,6 +4,8 @@ import binascii
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,16 +20,32 @@ TMP_DIR = Path("/tmp")
 
 _model: WhisperModel | None = None
 
+# Single worker: transcriptions run strictly one at a time. Parallel whisper
+# runs thrash the CPU (everyone gets slower) and multiply peak RAM usage.
+_executor = ThreadPoolExecutor(max_workers=1)
+
+# jobs submitted and not yet finished; mutated only from the event loop thread
+queue_size = 0
+
+ProgressCallback = Callable[[str], Awaitable[None]]
+
 
 class DownloadError(Exception):
     """yt-dlp could not download the video (private, geo-blocked, bad URL...)."""
+
+
+class VideoTooLongError(Exception):
+    def __init__(self, duration: int, limit: int):
+        super().__init__(f"video is {duration}s, limit is {limit}s")
+        self.duration = duration
+        self.limit = limit
 
 
 @dataclass
 class Transcript:
     title: str
     duration: int  # seconds, 0 if unknown
-    segments: list[tuple[int, str]]  # (start second, text)
+    segments: list[tuple[float, float, str]]  # (start, end, text)
 
 
 def _get_model() -> WhisperModel:
@@ -57,7 +75,7 @@ def _cookie_file() -> str | None:
     return str(path)
 
 
-def _download(url: str, file_id: str) -> tuple[Path, dict]:
+def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, dict]:
     outtmpl = str(TMP_DIR / f"{file_id}.%(ext)s")
     opts = {
         # pure audio if available, else anything containing an audio track,
@@ -72,6 +90,9 @@ def _download(url: str, file_id: str) -> tuple[Path, dict]:
         # of deep inside whisper's decoder) when the video has no sound
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
     }
+    if max_duration:
+        # rejects during extraction, before any bytes are downloaded
+        opts["match_filter"] = yt_dlp.utils.match_filter_func(f"duration <= {max_duration}")
     cookies = _cookie_file()
     if cookies:
         opts["cookiefile"] = cookies
@@ -84,15 +105,19 @@ def _download(url: str, file_id: str) -> tuple[Path, dict]:
     except yt_dlp.utils.YoutubeDLError as e:
         raise DownloadError(str(e)) from e
 
+    info = info or {}
     files = list(TMP_DIR.glob(f"{file_id}.*"))
     if not files:
+        duration = int(info.get("duration") or 0)
+        if max_duration and duration > max_duration:
+            raise VideoTooLongError(duration, max_duration)
         raise DownloadError("Download finished but no media file was produced")
     # prefer the extracted audio if the original somehow survived alongside it
     files.sort(key=lambda f: f.suffix != ".m4a")
-    return files[0], info or {}
+    return files[0], info
 
 
-def _transcribe_file(path: Path) -> list[tuple[int, str]]:
+def _transcribe_file(path: Path) -> list[tuple[float, float, str]]:
     model = _get_model()
     logger.info("Transcribing %s...", path.name)
     started = time.monotonic()
@@ -108,25 +133,40 @@ def _transcribe_file(path: Path) -> list[tuple[int, str]]:
     for segment in segments:  # generator: transcription happens while iterating
         text = segment.text.strip()
         if text:
-            result.append((int(segment.start), text))
+            result.append((float(segment.start), float(segment.end), text))
     logger.info("Transcribed %s in %.1fs", path.name, time.monotonic() - started)
     return result
 
 
-async def transcribe_url(url: str) -> Transcript:
+async def transcribe_url(
+    url: str,
+    max_duration: int | None = None,
+    progress: ProgressCallback | None = None,
+) -> Transcript:
     """Download the video and return a timestamped transcript. Raises
-    DownloadError on download failures. Temp files are always removed."""
-    loop = asyncio.get_event_loop()
+    DownloadError / VideoTooLongError on failures. Temp files are always
+    removed. Jobs are processed strictly one at a time."""
+    global queue_size
+    loop = asyncio.get_running_loop()
     file_id = uuid.uuid4().hex
+    ahead = queue_size
+    queue_size += 1
     try:
-        path, info = await loop.run_in_executor(None, _download, url, file_id)
+        if progress and ahead:
+            await progress(f"⏳ В очереди — впереди видео: {ahead}. Начну, как только освобожусь...")
+        path, info = await loop.run_in_executor(_executor, _download, url, file_id, max_duration)
         logger.info("Downloaded %s -> %s", url, path.name)
-        segments = await loop.run_in_executor(None, _transcribe_file, path)
+        duration = int(info.get("duration") or 0)
+        if progress:
+            note = f" ({duration // 60}:{duration % 60:02d})" if duration else ""
+            await progress(f"🎙 Расшифровываю{note}...")
+        segments = await loop.run_in_executor(_executor, _transcribe_file, path)
         return Transcript(
             title=info.get("title") or "Видео",
-            duration=int(info.get("duration") or 0),
+            duration=duration,
             segments=segments,
         )
     finally:
+        queue_size -= 1
         for leftover in TMP_DIR.glob(f"{file_id}.*"):
             leftover.unlink(missing_ok=True)

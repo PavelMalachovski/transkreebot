@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     subscription_price_cents: int = 300  # EUR 3.00
     subscription_days: int = 30
 
+    # per-video duration caps, seconds
+    free_max_duration: int = 900  # 15 min
+    sub_max_duration: int = 7200  # 2 h
+
+    # Comma-separated telegram ids that receive alerts and can use /stats.
+    admin_user_ids: str = "540529430"
+
     # Comma-separated telegram ids that always transcribe for free, no limits.
     free_user_ids: str = "540529430,1115719673"
     # Netscape-format cookies content for yt-dlp (needed for Instagram, which
@@ -24,6 +31,10 @@ class Settings(BaseSettings):
     @property
     def free_user_id_set(self) -> set[int]:
         return {int(x) for x in self.free_user_ids.replace(" ", "").split(",") if x}
+
+    @property
+    def admin_id_set(self) -> set[int]:
+        return {int(x) for x in self.admin_user_ids.replace(" ", "").split(",") if x}
 
     @property
     def provider_token(self) -> str:

@@ -3,6 +3,7 @@ import logging
 import re
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message
 
 import db
@@ -18,8 +19,21 @@ URL_RE = re.compile(r"https?://\S+")
 # Telegram message hard limit is 4096 chars; leave headroom.
 CHUNK_SIZE = 4000
 
+# "Processing" messages of in-flight jobs, edited on shutdown so users
+# aren't left staring at a stuck status after a redeploy.
+_active_statuses: set[Message] = set()
 
-def format_timestamp(seconds: int) -> str:
+
+async def notify_restart(**kwargs) -> None:
+    for status in list(_active_statuses):
+        try:
+            await status.edit_text("♻️ Бот обновляется. Пришли ссылку ещё раз через минуту 🙏")
+        except Exception:
+            pass
+
+
+def format_timestamp(seconds: float) -> str:
+    seconds = int(seconds)
     minutes, secs = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
@@ -33,7 +47,7 @@ def format_transcript(t: transcriber.Transcript) -> str:
         header += f" · {format_timestamp(t.duration)}"
     lines = [
         f"<b>{format_timestamp(start)}</b>  {html.escape(text)}"
-        for start, text in t.segments
+        for start, _end, text in t.segments
     ]
     return header + "\n\n" + "\n".join(lines)
 
@@ -69,14 +83,32 @@ async def handle_url(message: Message) -> None:
     if not unlimited and user["free_videos_used"] >= settings.free_video_limit:
         await message.answer(
             f"Бесплатный лимит ({settings.free_video_limit} видео) исчерпан. 😔\n"
-            "Оформи подписку за €3/мес и расшифровывай без ограничений: /subscribe"
+            "Оформи подписку и расшифровывай без ограничений: /subscribe"
         )
         return
 
-    status = await message.answer("Processing... ⏳")
+    status = await message.answer("⬇️ Скачиваю видео...")
+    _active_statuses.add(status)
 
+    async def progress(text: str) -> None:
+        try:
+            await status.edit_text(text)
+        except TelegramBadRequest:
+            pass  # e.g. text identical to the current one
+
+    max_duration = settings.sub_max_duration if unlimited else settings.free_max_duration
     try:
-        transcript = await transcriber.transcribe_url(url)
+        transcript = await transcriber.transcribe_url(url, max_duration, progress)
+    except transcriber.VideoTooLongError as e:
+        limit_note = (
+            "" if unlimited
+            else f"\nПо подписке лимит больше — {settings.sub_max_duration // 60} минут: /subscribe"
+        )
+        await status.edit_text(
+            f"Это видео слишком длинное ({format_timestamp(e.duration)}). "
+            f"Максимум сейчас — {e.limit // 60} минут.{limit_note}"
+        )
+        return
     except transcriber.DownloadError:
         logger.exception("Download failed for %s (user %s)", url, message.from_user.id)
         await status.edit_text(
@@ -91,6 +123,8 @@ async def handle_url(message: Message) -> None:
         logger.exception("Transcription failed for %s (user %s)", url, message.from_user.id)
         await status.edit_text("Что-то пошло не так при расшифровке. Попробуй ещё раз позже. 🙏")
         return
+    finally:
+        _active_statuses.discard(status)
 
     if not transcript.segments:
         await status.edit_text("В этом видео не нашлось речи — расшифровка пустая. 🤷")
@@ -112,7 +146,7 @@ async def handle_url(message: Message) -> None:
         else:
             await message.answer(
                 "Это было последнее бесплатное видео. "
-                "Дальше — подписка €3/мес: /subscribe"
+                "Дальше — подписка: /subscribe"
             )
 
 
