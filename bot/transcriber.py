@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import binascii
 import logging
 import uuid
 from pathlib import Path
@@ -29,11 +31,20 @@ def _get_model() -> whisper.Whisper:
 
 
 def _cookie_file() -> str | None:
-    if not settings.ytdlp_cookies:
+    raw = settings.ytdlp_cookies.strip()
+    if not raw:
         return None
+    # Netscape cookies.txt is tab-separated; no tabs means the value is
+    # base64-encoded (safer to paste into an env var without mangling).
+    if "\t" not in raw:
+        try:
+            raw = base64.b64decode(raw).decode()
+        except (binascii.Error, UnicodeDecodeError):
+            logger.warning("YTDLP_COOKIES is neither cookies.txt content nor valid base64, ignoring")
+            return None
     path = TMP_DIR / "ytdlp_cookies.txt"
     if not path.exists():
-        path.write_text(settings.ytdlp_cookies)
+        path.write_text(raw)
     return str(path)
 
 
@@ -51,6 +62,8 @@ def _download(url: str, file_id: str) -> Path:
     cookies = _cookie_file()
     if cookies:
         opts["cookiefile"] = cookies
+    elif "instagram.com" in url:
+        logger.warning("Instagram URL without YTDLP_COOKIES set — download will likely be rate-limited")
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.extract_info(url, download=True)
