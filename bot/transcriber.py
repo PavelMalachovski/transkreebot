@@ -4,10 +4,11 @@ import binascii
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
-import whisper
 import yt_dlp
+from faster_whisper import WhisperModel
 
 from config import settings
 
@@ -15,18 +16,25 @@ logger = logging.getLogger(__name__)
 
 TMP_DIR = Path("/tmp")
 
-_model: whisper.Whisper | None = None
+_model: WhisperModel | None = None
 
 
 class DownloadError(Exception):
     """yt-dlp could not download the video (private, geo-blocked, bad URL...)."""
 
 
-def _get_model() -> whisper.Whisper:
+@dataclass
+class Transcript:
+    title: str
+    duration: int  # seconds, 0 if unknown
+    segments: list[tuple[int, str]]  # (start second, text)
+
+
+def _get_model() -> WhisperModel:
     global _model
     if _model is None:
-        logger.info("Loading whisper model 'small' (first request only)...")
-        _model = whisper.load_model("small")
+        logger.info("Loading faster-whisper model 'small' (int8)...")
+        _model = WhisperModel("small", device="cpu", compute_type="int8")
         logger.info("Whisper model loaded")
     return _model
 
@@ -49,7 +57,7 @@ def _cookie_file() -> str | None:
     return str(path)
 
 
-def _download(url: str, file_id: str) -> Path:
+def _download(url: str, file_id: str) -> tuple[Path, dict]:
     outtmpl = str(TMP_DIR / f"{file_id}.%(ext)s")
     opts = {
         # audio is all whisper needs; skips huge video streams
@@ -67,39 +75,45 @@ def _download(url: str, file_id: str) -> Path:
         logger.warning("Instagram URL without YTDLP_COOKIES set — download will likely be rate-limited")
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.extract_info(url, download=True)
+            info = ydl.extract_info(url, download=True)
     except yt_dlp.utils.DownloadError as e:
         raise DownloadError(str(e)) from e
 
     files = list(TMP_DIR.glob(f"{file_id}.*"))
     if not files:
         raise DownloadError("Download finished but no media file was produced")
-    return files[0]
+    return files[0], info or {}
 
 
-def _transcribe_file(path: Path) -> str:
+def _transcribe_file(path: Path) -> list[tuple[int, str]]:
     model = _get_model()
     logger.info("Transcribing %s...", path.name)
     started = time.monotonic()
-    result = model.transcribe(str(path), language="ru")
-    logger.info("Transcribed %s in %.1fs", path.name, time.monotonic() - started)
-    lines = []
-    for segment in result["segments"]:
-        text = segment["text"].strip()
+    # vad_filter skips silence, which speeds things up and reduces hallucinations
+    segments, _info = model.transcribe(str(path), language="ru", vad_filter=True)
+    result = []
+    for segment in segments:  # generator: transcription happens while iterating
+        text = segment.text.strip()
         if text:
-            lines.append(f"[{int(segment['start'])}] {text}")
-    return "\n".join(lines)
+            result.append((int(segment.start), text))
+    logger.info("Transcribed %s in %.1fs", path.name, time.monotonic() - started)
+    return result
 
 
-async def transcribe_url(url: str) -> str:
-    """Download the video and return timestamped text. Raises DownloadError on
-    download failures. Temp files are always removed."""
+async def transcribe_url(url: str) -> Transcript:
+    """Download the video and return a timestamped transcript. Raises
+    DownloadError on download failures. Temp files are always removed."""
     loop = asyncio.get_event_loop()
     file_id = uuid.uuid4().hex
     try:
-        path = await loop.run_in_executor(None, _download, url, file_id)
+        path, info = await loop.run_in_executor(None, _download, url, file_id)
         logger.info("Downloaded %s -> %s", url, path.name)
-        return await loop.run_in_executor(None, _transcribe_file, path)
+        segments = await loop.run_in_executor(None, _transcribe_file, path)
+        return Transcript(
+            title=info.get("title") or "Видео",
+            duration=int(info.get("duration") or 0),
+            segments=segments,
+        )
     finally:
         for leftover in TMP_DIR.glob(f"{file_id}.*"):
             leftover.unlink(missing_ok=True)

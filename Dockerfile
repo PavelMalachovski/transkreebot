@@ -7,13 +7,11 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY requirements.txt .
-# CPU-only torch keeps the image several GB smaller than the default CUDA build
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # bake the whisper model into the image so the first request doesn't
-# spend time downloading 461MB at runtime
-RUN python -c "import whisper; whisper.load_model('small')"
+# spend time downloading it at runtime
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 
 COPY . .
 

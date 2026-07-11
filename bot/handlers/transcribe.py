@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 
@@ -18,8 +19,27 @@ URL_RE = re.compile(r"https?://\S+")
 CHUNK_SIZE = 4000
 
 
+def format_timestamp(seconds: int) -> str:
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def format_transcript(t: transcriber.Transcript) -> str:
+    header = f"🎬 <b>{html.escape(t.title)}</b>"
+    if t.duration:
+        header += f" · {format_timestamp(t.duration)}"
+    lines = [
+        f"<b>{format_timestamp(start)}</b>  {html.escape(text)}"
+        for start, text in t.segments
+    ]
+    return header + "\n\n" + "\n".join(lines)
+
+
 def split_into_chunks(text: str, size: int = CHUNK_SIZE) -> list[str]:
-    """Split by lines so a whisper segment is never cut in half."""
+    """Split by lines so a segment (and its HTML tags) is never cut in half."""
     chunks: list[str] = []
     current: list[str] = []
     current_len = 0
@@ -56,7 +76,7 @@ async def handle_url(message: Message) -> None:
     status = await message.answer("Processing... ⏳")
 
     try:
-        text = await transcriber.transcribe_url(url)
+        transcript = await transcriber.transcribe_url(url)
     except transcriber.DownloadError:
         logger.exception("Download failed for %s (user %s)", url, message.from_user.id)
         await status.edit_text(
@@ -71,7 +91,7 @@ async def handle_url(message: Message) -> None:
         await status.edit_text("Что-то пошло не так при расшифровке. Попробуй ещё раз позже. 🙏")
         return
 
-    if not text:
+    if not transcript.segments:
         await status.edit_text("В этом видео не нашлось речи — расшифровка пустая. 🤷")
         return
 
@@ -79,10 +99,10 @@ async def handle_url(message: Message) -> None:
     if not unlimited:
         await db.increment_free_videos(message.from_user.id)
 
-    chunks = split_into_chunks(text)
-    await status.edit_text(chunks[0])
+    chunks = split_into_chunks(format_transcript(transcript))
+    await status.edit_text(chunks[0], parse_mode="HTML")
     for chunk in chunks[1:]:
-        await message.answer(chunk)
+        await message.answer(chunk, parse_mode="HTML")
 
     if not unlimited:
         left = settings.free_video_limit - user["free_videos_used"] - 1
