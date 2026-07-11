@@ -11,6 +11,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 
+# bake the whisper model into the image so the first request doesn't
+# spend time downloading 461MB at runtime
+RUN python -c "import whisper; whisper.load_model('small')"
+
 COPY . .
 
 CMD ["python", "bot/main.py"]

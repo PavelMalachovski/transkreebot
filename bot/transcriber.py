@@ -2,6 +2,7 @@ import asyncio
 import base64
 import binascii
 import logging
+import time
 import uuid
 from pathlib import Path
 
@@ -78,7 +79,10 @@ def _download(url: str, file_id: str) -> Path:
 
 def _transcribe_file(path: Path) -> str:
     model = _get_model()
+    logger.info("Transcribing %s...", path.name)
+    started = time.monotonic()
     result = model.transcribe(str(path), language="ru")
+    logger.info("Transcribed %s in %.1fs", path.name, time.monotonic() - started)
     lines = []
     for segment in result["segments"]:
         text = segment["text"].strip()
