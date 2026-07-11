@@ -82,7 +82,8 @@ async def handle_url(message: Message) -> None:
         await status.edit_text(
             "Не получилось скачать это видео. 😕\n"
             "Проверь, что ссылка рабочая, видео не приватное и не удалено, "
-            "и что это YouTube, Instagram или TikTok.\n"
+            "и что это YouTube, Instagram или TikTok. "
+            "Возможно также, что в видео нет звуковой дорожки.\n"
             "Instagram иногда блокирует скачивание — в таком случае попробуй позже."
         )
         return

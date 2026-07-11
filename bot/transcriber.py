@@ -60,13 +60,17 @@ def _cookie_file() -> str | None:
 def _download(url: str, file_id: str) -> tuple[Path, dict]:
     outtmpl = str(TMP_DIR / f"{file_id}.%(ext)s")
     opts = {
-        # audio is all whisper needs; skips huge video streams
-        "format": "bestaudio/best",
+        # pure audio if available, else anything containing an audio track,
+        # else whatever there is — the postprocessor extracts audio anyway
+        "format": "bestaudio/bestaudio*/best",
         "outtmpl": outtmpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "max_filesize": 500 * 1024 * 1024,
+        # always hand whisper a clean audio file; fails loudly here (instead
+        # of deep inside whisper's decoder) when the video has no sound
+        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
     }
     cookies = _cookie_file()
     if cookies:
@@ -76,12 +80,15 @@ def _download(url: str, file_id: str) -> tuple[Path, dict]:
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
-    except yt_dlp.utils.DownloadError as e:
+    # YoutubeDLError covers both download and postprocessing (ffmpeg) failures
+    except yt_dlp.utils.YoutubeDLError as e:
         raise DownloadError(str(e)) from e
 
     files = list(TMP_DIR.glob(f"{file_id}.*"))
     if not files:
         raise DownloadError("Download finished but no media file was produced")
+    # prefer the extracted audio if the original somehow survived alongside it
+    files.sort(key=lambda f: f.suffix != ".m4a")
     return files[0], info or {}
 
 
