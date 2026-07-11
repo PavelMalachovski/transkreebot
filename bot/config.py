@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Netscape-format cookies content for yt-dlp (needed for Instagram, which
     # rate-limits anonymous access). Paste the exported cookies.txt content here.
     ytdlp_cookies: str = ""
+    # Optional proxy for yt-dlp (e.g. a residential proxy when YouTube blocks
+    # the hoster's datacenter IPs), format: http://user:pass@host:port
+    proxy_url: str = ""
 
     @property
     def free_user_id_set(self) -> set[int]:

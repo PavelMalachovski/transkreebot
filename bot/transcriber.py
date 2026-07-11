@@ -89,7 +89,12 @@ def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, d
         # always hand whisper a clean audio file; fails loudly here (instead
         # of deep inside whisper's decoder) when the video has no sound
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
+        # the tv client usually skips YouTube's "confirm you're not a bot"
+        # wall on datacenter IPs; web clients follow as cookie-aware fallbacks
+        "extractor_args": {"youtube": {"player_client": ["tv", "web_safari", "web"]}},
     }
+    if settings.proxy_url:
+        opts["proxy"] = settings.proxy_url
     if max_duration:
         # rejects during extraction, before any bytes are downloaded
         opts["match_filter"] = yt_dlp.utils.match_filter_func(f"duration <= {max_duration}")
