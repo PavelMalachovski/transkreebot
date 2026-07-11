@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher
 
 import db
 from config import settings
-from handlers import payments, start, transcribe
+from handlers import admin, payments, start, transcribe
 
 
 async def main() -> None:
@@ -22,7 +22,7 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
     # transcribe last: it has a catch-all text handler
-    dp.include_routers(start.router, payments.router, transcribe.router)
+    dp.include_routers(start.router, admin.router, payments.router, transcribe.router)
     # tell users with in-flight jobs about the restart instead of leaving
     # them staring at a frozen status message
     dp.shutdown.register(transcribe.notify_restart)
