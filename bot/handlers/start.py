@@ -31,6 +31,10 @@ async def cmd_start(message: Message) -> None:
 async def cmd_status(message: Message) -> None:
     user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
 
+    if message.from_user.id in settings.free_user_id_set:
+        await message.answer("⭐ Для тебя всё бесплатно и без ограничений.")
+        return
+
     if db.has_active_subscription(user):
         until = user["subscription_until"].strftime("%d.%m.%Y")
         if user["cancel_at_period_end"]:

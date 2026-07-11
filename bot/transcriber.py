@@ -6,6 +6,8 @@ from pathlib import Path
 import whisper
 import yt_dlp
 
+from config import settings
+
 logger = logging.getLogger(__name__)
 
 TMP_DIR = Path("/tmp")
@@ -26,6 +28,15 @@ def _get_model() -> whisper.Whisper:
     return _model
 
 
+def _cookie_file() -> str | None:
+    if not settings.ytdlp_cookies:
+        return None
+    path = TMP_DIR / "ytdlp_cookies.txt"
+    if not path.exists():
+        path.write_text(settings.ytdlp_cookies)
+    return str(path)
+
+
 def _download(url: str, file_id: str) -> Path:
     outtmpl = str(TMP_DIR / f"{file_id}.%(ext)s")
     opts = {
@@ -37,6 +48,9 @@ def _download(url: str, file_id: str) -> Path:
         "no_warnings": True,
         "max_filesize": 500 * 1024 * 1024,
     }
+    cookies = _cookie_file()
+    if cookies:
+        opts["cookiefile"] = cookies
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.extract_info(url, download=True)

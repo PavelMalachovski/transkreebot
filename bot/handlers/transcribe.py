@@ -41,8 +41,12 @@ async def handle_url(message: Message) -> None:
     url = URL_RE.search(message.text).group(0)
     user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
 
-    subscribed = db.has_active_subscription(user)
-    if not subscribed and user["free_videos_used"] >= settings.free_video_limit:
+    # whitelisted users are always free, no limits
+    unlimited = (
+        db.has_active_subscription(user)
+        or message.from_user.id in settings.free_user_id_set
+    )
+    if not unlimited and user["free_videos_used"] >= settings.free_video_limit:
         await message.answer(
             f"Бесплатный лимит ({settings.free_video_limit} видео) исчерпан. 😔\n"
             "Оформи подписку за €3/мес и расшифровывай без ограничений: /subscribe"
@@ -58,7 +62,8 @@ async def handle_url(message: Message) -> None:
         await status.edit_text(
             "Не получилось скачать это видео. 😕\n"
             "Проверь, что ссылка рабочая, видео не приватное и не удалено, "
-            "и что это YouTube, Instagram или TikTok."
+            "и что это YouTube, Instagram или TikTok.\n"
+            "Instagram иногда блокирует скачивание — в таком случае попробуй позже."
         )
         return
     except Exception:
@@ -71,7 +76,7 @@ async def handle_url(message: Message) -> None:
         return
 
     # Quota is spent only after a successful transcription.
-    if not subscribed:
+    if not unlimited:
         await db.increment_free_videos(message.from_user.id)
 
     chunks = split_into_chunks(text)
@@ -79,7 +84,7 @@ async def handle_url(message: Message) -> None:
     for chunk in chunks[1:]:
         await message.answer(chunk)
 
-    if not subscribed:
+    if not unlimited:
         left = settings.free_video_limit - user["free_videos_used"] - 1
         if left > 0:
             await message.answer(f"Осталось бесплатных видео: {left}.")
