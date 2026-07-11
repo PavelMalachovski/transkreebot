@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import LabeledPrice, Message, PreCheckoutQuery
 
@@ -23,19 +24,41 @@ async def cmd_subscribe(message: Message) -> None:
         await message.answer(f"У тебя уже есть активная подписка до {until}. 🎉")
         return
 
-    if not settings.provider_token:
+    token = settings.provider_token
+    if not token:
         logger.error("PAYMENTS_PROVIDER_TOKEN is not set, cannot send invoice")
         await message.answer("Оплата временно недоступна, попробуй позже. 🙏")
         return
+    # BotFather provider tokens look like 123456789:LIVE:... or 123456789:TEST:...
+    if ":LIVE:" not in token and ":TEST:" not in token:
+        logger.error(
+            "PAYMENTS_PROVIDER_TOKEN doesn't look like a BotFather provider token "
+            "(expected 123456789:LIVE:... format). A Stripe API key (sk_...) won't work — "
+            "get the token from @BotFather: /mybots -> Bot -> Payments -> Stripe."
+        )
+        await message.answer("Оплата временно недоступна, попробуй позже. 🙏")
+        return
 
-    await message.answer_invoice(
-        title="Подписка на 1 месяц",
-        description="Безлимитная расшифровка видео на 30 дней.",
-        payload=SUBSCRIPTION_PAYLOAD,
-        provider_token=settings.provider_token,
-        currency="EUR",
-        prices=[LabeledPrice(label="Подписка на месяц", amount=settings.subscription_price_cents)],
-    )
+    try:
+        await message.answer_invoice(
+            title="Подписка Transkreebot — 1 месяц",
+            description=(
+                "Безлимитная расшифровка видео на 30 дней. "
+                "Продление можно отключить в любой момент командой /cancel."
+            ),
+            payload=SUBSCRIPTION_PAYLOAD,
+            provider_token=token,
+            currency="EUR",
+            prices=[LabeledPrice(label="Подписка на месяц", amount=settings.subscription_price_cents)],
+        )
+    except TelegramBadRequest as e:
+        logger.error(
+            "Failed to send invoice: %s. Check PAYMENTS_PROVIDER_TOKEN on Railway — "
+            "it must be the token @BotFather issues after connecting Stripe "
+            "(/mybots -> Bot -> Payments), not a Stripe API key.",
+            e.message,
+        )
+        await message.answer("Оплата временно недоступна, попробуй позже. 🙏")
 
 
 @router.pre_checkout_query()
