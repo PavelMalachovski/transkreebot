@@ -1,0 +1,5 @@
+aiogram>=3.13,<4
+asyncpg>=0.29
+openai-whisper>=20240930
+yt-dlp>=2025.1.15
+pydantic-settings>=2.4
