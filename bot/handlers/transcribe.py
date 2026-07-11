@@ -195,15 +195,20 @@ async def handle_url(message: Message) -> None:
         )
         await db.log_request(message.from_user.id, url, "too_long", video_duration=e.duration)
         return
-    except transcriber.DownloadError:
+    except transcriber.DownloadError as e:
         logger.exception("Download failed for %s (user %s)", url, message.from_user.id)
-        await status.edit_text(
-            "Не получилось скачать это видео. 😕\n"
-            "Проверь, что ссылка рабочая, видео не приватное и не удалено, "
-            "и что это YouTube, Instagram или TikTok. "
-            "Возможно также, что в видео нет звуковой дорожки.\n"
-            "Instagram иногда блокирует скачивание — в таком случае попробуй позже."
-        )
+        if "DRM" in str(e):
+            await status.edit_text(
+                "Это видео защищено DRM — скачать и расшифровать его нельзя. 😕"
+            )
+        else:
+            await status.edit_text(
+                "Не получилось скачать это видео. 😕\n"
+                "Проверь, что ссылка рабочая, видео не приватное и не удалено, "
+                "и что это YouTube, Instagram или TikTok. "
+                "Возможно также, что в видео нет звуковой дорожки.\n"
+                "Instagram иногда блокирует скачивание — в таком случае попробуй позже."
+            )
         await db.log_request(message.from_user.id, url, "download_error")
         if "instagram.com" in url:
             _insta_failures += 1

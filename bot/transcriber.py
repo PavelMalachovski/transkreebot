@@ -90,8 +90,12 @@ def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, d
         # of deep inside whisper's decoder) when the video has no sound
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
         # the tv client usually skips YouTube's "confirm you're not a bot"
-        # wall on datacenter IPs; web clients follow as cookie-aware fallbacks
-        "extractor_args": {"youtube": {"player_client": ["tv", "web_safari", "web"]}},
+        # wall on datacenter IPs but sometimes only gets DRM formats;
+        # web_embedded works anonymously for embeddable videos without that
+        # quirk, and the web clients follow as cookie-aware fallbacks
+        "extractor_args": {
+            "youtube": {"player_client": ["tv", "web_embedded", "web_safari", "web"]}
+        },
     }
     if settings.proxy_url:
         opts["proxy"] = settings.proxy_url
