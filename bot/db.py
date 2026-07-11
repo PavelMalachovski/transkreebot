@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_charge_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS free_week_start DATE;
+
 CREATE TABLE IF NOT EXISTS transcripts (
     url_hash TEXT PRIMARY KEY,
     url TEXT NOT NULL,
@@ -71,6 +74,16 @@ async def get_or_create_user(telegram_id: int, username: str | None) -> asyncpg.
             telegram_id,
             username,
         )
+        # the free quota renews weekly
+        week_start = row["free_week_start"]
+        if week_start is None or week_start <= utcnow().date() - timedelta(days=7):
+            row = await conn.fetchrow(
+                """
+                UPDATE users SET free_videos_used = 0, free_week_start = CURRENT_DATE
+                WHERE telegram_id = $1 RETURNING *
+                """,
+                telegram_id,
+            )
     return row
 
 
@@ -90,28 +103,31 @@ async def increment_free_videos(telegram_id: int) -> None:
         )
 
 
-async def activate_subscription(telegram_id: int, days: int) -> datetime:
-    until = utcnow() + timedelta(days=days)
+async def activate_subscription(
+    telegram_id: int, until: datetime, charge_id: str | None
+) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE users
             SET subscription_active = TRUE,
                 subscription_until = $2,
+                telegram_charge_id = COALESCE($3, telegram_charge_id),
                 cancel_at_period_end = FALSE
             WHERE telegram_id = $1
             """,
             telegram_id,
             until,
+            charge_id,
         )
-    return until
 
 
-async def set_cancel_at_period_end(telegram_id: int) -> None:
+async def set_cancel_at_period_end(telegram_id: int, value: bool = True) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE users SET cancel_at_period_end = TRUE WHERE telegram_id = $1",
+            "UPDATE users SET cancel_at_period_end = $2 WHERE telegram_id = $1",
             telegram_id,
+            value,
         )
 
 

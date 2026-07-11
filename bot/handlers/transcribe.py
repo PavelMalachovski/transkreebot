@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from datetime import timedelta
 from urllib.parse import urlsplit, urlunsplit
 
 from aiogram import F, Router
@@ -145,9 +146,13 @@ async def handle_url(message: Message) -> None:
         or message.from_user.id in settings.free_user_id_set
     )
     if not unlimited and user["free_videos_used"] >= settings.free_video_limit:
+        renew_note = ""
+        if user["free_week_start"] is not None:
+            renew_date = user["free_week_start"] + timedelta(days=7)
+            renew_note = f"Новые бесплатные видео — {renew_date.strftime('%d.%m.%Y')}. "
         await message.answer(
-            f"Бесплатный лимит ({settings.free_video_limit} видео) исчерпан. 😔\n"
-            "Оформи подписку и расшифровывай без ограничений: /subscribe"
+            f"Недельный лимит ({settings.free_video_limit} видео) исчерпан. 😔\n"
+            f"{renew_note}Или оформи подписку и расшифровывай без ограничений: /subscribe"
         )
         return
 
@@ -256,11 +261,11 @@ async def _send_transcript(
     if not unlimited:
         left = settings.free_video_limit - user["free_videos_used"] - 1
         if left > 0:
-            await message.answer(f"Осталось бесплатных видео: {left}.")
+            await message.answer(f"Осталось бесплатных видео на этой неделе: {left}.")
         else:
             await message.answer(
-                "Это было последнее бесплатное видео. "
-                "Дальше — подписка: /subscribe"
+                "Это было последнее бесплатное видео на этой неделе. "
+                "Безлимит — по подписке: /subscribe"
             )
 
 

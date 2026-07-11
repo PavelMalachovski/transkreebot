@@ -1,4 +1,4 @@
-aiogram>=3.13,<4
+aiogram>=3.16,<4
 asyncpg>=0.29
 faster-whisper>=1.0
 yt-dlp>=2025.1.15

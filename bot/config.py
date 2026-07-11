@@ -6,13 +6,9 @@ class Settings(BaseSettings):
 
     bot_token: str
     database_url: str
-    # Telegram Payments provider token issued by BotFather for Stripe.
-    # Either variable works; PAYMENTS_PROVIDER_TOKEN wins if both are set.
-    payments_provider_token: str = ""
-    stripe_token: str = ""
 
-    free_video_limit: int = 3
-    subscription_price_cents: int = 300  # EUR 3.00
+    free_video_limit: int = 3  # per week
+    subscription_stars: int = 250  # Telegram Stars per month, ~EUR 3-4
     subscription_days: int = 30
 
     # per-video duration caps, seconds
@@ -35,10 +31,5 @@ class Settings(BaseSettings):
     @property
     def admin_id_set(self) -> set[int]:
         return {int(x) for x in self.admin_user_ids.replace(" ", "").split(",") if x}
-
-    @property
-    def provider_token(self) -> str:
-        return self.payments_provider_token or self.stripe_token
-
 
 settings = Settings()
