@@ -4,7 +4,13 @@ from datetime import timedelta, timezone
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
-from aiogram.types import LabeledPrice, Message, PreCheckoutQuery
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LabeledPrice,
+    Message,
+    PreCheckoutQuery,
+)
 
 import db
 from config import settings
@@ -41,16 +47,38 @@ async def cmd_subscribe(message: Message) -> None:
                 logger.warning("Could not re-enable subscription renewal: %s", e.message)
                 # fall through to a fresh invoice
 
-    await message.answer_invoice(
-        title="Подписка Transkreebot — 1 месяц",
-        description=(
-            "Безлимитная расшифровка видео до 2 часов длиной. "
-            "Продлевается автоматически, отменить можно в любой момент: /cancel"
-        ),
-        payload=SUBSCRIPTION_PAYLOAD,
-        currency="XTR",  # Telegram Stars
-        prices=[LabeledPrice(label="Подписка на месяц", amount=settings.subscription_stars)],
-        subscription_period=MONTH_SECONDS,
+    # Stars subscriptions must be exported invoice links (sendInvoice with
+    # subscription_period fails with SUBSCRIPTION_EXPORT_MISSING)
+    try:
+        link = await message.bot.create_invoice_link(
+            title="Подписка Transkreebot — 1 месяц",
+            description=(
+                "Безлимитная расшифровка видео до 2 часов длиной. "
+                "Продлевается автоматически, отменить можно в любой момент."
+            ),
+            payload=SUBSCRIPTION_PAYLOAD,
+            currency="XTR",  # Telegram Stars
+            prices=[LabeledPrice(label="Подписка на месяц", amount=settings.subscription_stars)],
+            subscription_period=MONTH_SECONDS,
+        )
+    except TelegramBadRequest as e:
+        logger.error("Failed to create subscription invoice link: %s", e.message)
+        await message.answer("Оплата временно недоступна, попробуй позже. 🙏")
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text=f"Оформить за {settings.subscription_stars} ⭐ в месяц", url=link
+        )
+    ]])
+    await message.answer(
+        "⭐ <b>Подписка Transkreebot</b>\n\n"
+        f"Безлимитная расшифровка видео до {settings.sub_max_duration // 3600} часов длиной, "
+        "приоритет в очереди.\n"
+        f"{settings.subscription_stars} Stars в месяц, продлевается автоматически — "
+        "отменить можно в любой момент командой /cancel.",
+        parse_mode="HTML",
+        reply_markup=keyboard,
     )
 
 
