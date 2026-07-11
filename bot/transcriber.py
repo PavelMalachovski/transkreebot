@@ -96,8 +96,14 @@ def _transcribe_file(path: Path) -> list[tuple[int, str]]:
     model = _get_model()
     logger.info("Transcribing %s...", path.name)
     started = time.monotonic()
+    # no language set: whisper auto-detects and transcribes in the original;
     # vad_filter skips silence, which speeds things up and reduces hallucinations
-    segments, _info = model.transcribe(str(path), language="ru", vad_filter=True)
+    segments, info = model.transcribe(str(path), vad_filter=True)
+    logger.info(
+        "Detected language: %s (probability %.2f)",
+        info.language,
+        info.language_probability,
+    )
     result = []
     for segment in segments:  # generator: transcription happens while iterating
         text = segment.text.strip()
