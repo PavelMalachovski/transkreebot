@@ -3,6 +3,7 @@ import logging
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 
 import db
 from config import settings
@@ -20,6 +21,12 @@ async def main() -> None:
     await db.init(settings.database_url)
 
     bot = Bot(token=settings.bot_token)
+    await bot.set_my_commands([
+        BotCommand(command="start", description="How the bot works"),
+        BotCommand(command="status", description="Free videos left & subscription"),
+        BotCommand(command="subscribe", description="Get an unlimited subscription"),
+        BotCommand(command="cancel", description="Turn off subscription renewal"),
+    ])
     dp = Dispatcher()
     # transcribe last: it has a catch-all text handler
     dp.include_routers(start.router, admin.router, payments.router, transcribe.router)

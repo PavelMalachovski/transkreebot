@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import binascii
+import heapq
+import itertools
 import logging
 import time
 import uuid
@@ -24,10 +26,46 @@ _model: WhisperModel | None = None
 # runs thrash the CPU (everyone gets slower) and multiply peak RAM usage.
 _executor = ThreadPoolExecutor(max_workers=1)
 
-# jobs submitted and not yet finished; mutated only from the event loop thread
-queue_size = 0
-
 ProgressCallback = Callable[[str], Awaitable[None]]
+
+PRIORITY_SUBSCRIBER = 0
+PRIORITY_FREE = 1
+
+# Priority gate serializing jobs: one job holds the slot, the rest wait in a
+# heap ordered by (priority, arrival). Mutated only from the event loop thread.
+_busy = False
+_waiters: list[tuple[int, int, asyncio.Future]] = []
+_seq = itertools.count()
+
+
+def queue_length() -> int:
+    return len(_waiters) + (1 if _busy else 0)
+
+
+async def _acquire_slot(priority: int) -> None:
+    global _busy
+    if not _busy and not _waiters:
+        _busy = True
+        return
+    fut = asyncio.get_running_loop().create_future()
+    heapq.heappush(_waiters, (priority, next(_seq), fut))
+    try:
+        await fut
+    except asyncio.CancelledError:
+        # the slot was already handed to us — pass it on
+        if fut.done() and not fut.cancelled():
+            _release_slot()
+        raise
+
+
+def _release_slot() -> None:
+    global _busy
+    while _waiters:
+        _, _, fut = heapq.heappop(_waiters)
+        if not fut.cancelled():
+            fut.set_result(None)  # slot handed over, _busy stays True
+            return
+    _busy = False
 
 
 class DownloadError(Exception):
@@ -148,18 +186,18 @@ async def transcribe_url(
     url: str,
     max_duration: int | None = None,
     progress: ProgressCallback | None = None,
+    priority: int = PRIORITY_FREE,
 ) -> Transcript:
     """Download the video and return a timestamped transcript. Raises
     DownloadError / VideoTooLongError on failures. Temp files are always
-    removed. Jobs are processed strictly one at a time."""
-    global queue_size
+    removed. Jobs run one at a time; subscribers skip ahead of free users."""
     loop = asyncio.get_running_loop()
     file_id = uuid.uuid4().hex
-    ahead = queue_size
-    queue_size += 1
+    ahead = queue_length()
+    if progress and ahead:
+        await progress(f"⏳ Queued — {ahead} job(s) ahead of you. Starting as soon as I'm free...")
+    await _acquire_slot(priority)
     try:
-        if progress and ahead:
-            await progress(f"⏳ Queued — {ahead} video(s) ahead of you. Starting as soon as I'm free...")
         path, info = await loop.run_in_executor(_executor, _download, url, file_id, max_duration)
         logger.info("Downloaded %s -> %s", url, path.name)
         duration = int(info.get("duration") or 0)
@@ -173,6 +211,28 @@ async def transcribe_url(
             segments=segments,
         )
     finally:
-        queue_size -= 1
+        _release_slot()
         for leftover in TMP_DIR.glob(f"{file_id}.*"):
             leftover.unlink(missing_ok=True)
+
+
+async def transcribe_local(
+    path: Path,
+    duration: int = 0,
+    progress: ProgressCallback | None = None,
+    priority: int = PRIORITY_FREE,
+) -> list[tuple[float, float, str]]:
+    """Transcribe an already-downloaded media file (e.g. a Telegram voice
+    message). The caller owns the file and its cleanup."""
+    loop = asyncio.get_running_loop()
+    ahead = queue_length()
+    if progress and ahead:
+        await progress(f"⏳ Queued — {ahead} job(s) ahead of you. Starting as soon as I'm free...")
+    await _acquire_slot(priority)
+    try:
+        if progress:
+            note = f" ({duration // 60}:{duration % 60:02d})" if duration else ""
+            await progress(f"🎙 Transcribing{note}...")
+        return await loop.run_in_executor(_executor, _transcribe_file, path)
+    finally:
+        _release_slot()

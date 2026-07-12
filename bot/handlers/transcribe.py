@@ -39,6 +39,45 @@ _active_statuses: set[Message] = set()
 _insta_failures = 0
 INSTA_ALERT_THRESHOLD = 3
 
+# anti-spam: one user may only have this many jobs in flight at once
+MAX_USER_JOBS = 2
+_user_jobs: dict[int, int] = {}
+
+
+def _too_many_jobs(user_id: int) -> bool:
+    return _user_jobs.get(user_id, 0) >= MAX_USER_JOBS
+
+
+def _job_started(user_id: int) -> None:
+    _user_jobs[user_id] = _user_jobs.get(user_id, 0) + 1
+
+
+def _job_finished(user_id: int) -> None:
+    left = _user_jobs.get(user_id, 1) - 1
+    if left > 0:
+        _user_jobs[user_id] = left
+    else:
+        _user_jobs.pop(user_id, None)
+
+
+async def _check_quota(message: Message, user) -> tuple[bool, bool]:
+    """Returns (unlimited, allowed); sends the denial message itself."""
+    unlimited = (
+        db.has_active_subscription(user)
+        or message.from_user.id in settings.free_user_id_set
+    )
+    if not unlimited and user["free_videos_used"] >= settings.free_video_limit:
+        renew_note = ""
+        if user["free_week_start"] is not None:
+            renew_date = user["free_week_start"] + timedelta(days=7)
+            renew_note = f"New free videos on {renew_date.strftime('%d.%m.%Y')}. "
+        await message.answer(
+            f"You've reached the weekly free limit ({settings.free_video_limit} videos). 😔\n"
+            f"{renew_note}Or subscribe for unlimited transcriptions: /subscribe"
+        )
+        return unlimited, False
+    return unlimited, True
+
 
 async def notify_restart(**kwargs) -> None:
     for status in list(_active_statuses):
@@ -136,24 +175,11 @@ async def _alert_admins_cookies(message: Message) -> None:
 
 @router.message(F.text.regexp(URL_RE.pattern))
 async def handle_url(message: Message) -> None:
-    global _insta_failures
     url = URL_RE.search(message.text).group(0)
     user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
 
-    # whitelisted users are always free, no limits
-    unlimited = (
-        db.has_active_subscription(user)
-        or message.from_user.id in settings.free_user_id_set
-    )
-    if not unlimited and user["free_videos_used"] >= settings.free_video_limit:
-        renew_note = ""
-        if user["free_week_start"] is not None:
-            renew_date = user["free_week_start"] + timedelta(days=7)
-            renew_note = f"New free videos on {renew_date.strftime('%d.%m.%Y')}. "
-        await message.answer(
-            f"You've reached the weekly free limit ({settings.free_video_limit} videos). 😔\n"
-            f"{renew_note}Or subscribe for unlimited transcriptions: /subscribe"
-        )
+    unlimited, allowed = await _check_quota(message, user)
+    if not allowed:
         return
 
     url_hash = cache_key(url)
@@ -171,6 +197,25 @@ async def handle_url(message: Message) -> None:
         await _send_transcript(message, None, transcript, url_hash, user, unlimited)
         return
 
+    if _too_many_jobs(message.from_user.id):
+        await message.answer(
+            f"You already have {MAX_USER_JOBS} videos processing — "
+            "please wait for them to finish. 🙏"
+        )
+        return
+
+    _job_started(message.from_user.id)
+    try:
+        await _process_url(message, user, unlimited, url, url_hash)
+    finally:
+        _job_finished(message.from_user.id)
+
+
+async def _process_url(
+    message: Message, user, unlimited: bool, url: str, url_hash: str
+) -> None:
+    global _insta_failures
+
     status = await message.answer("⬇️ Downloading the video...")
     _active_statuses.add(status)
 
@@ -181,9 +226,10 @@ async def handle_url(message: Message) -> None:
             pass  # e.g. text identical to the current one
 
     max_duration = settings.sub_max_duration if unlimited else settings.free_max_duration
+    priority = transcriber.PRIORITY_SUBSCRIBER if unlimited else transcriber.PRIORITY_FREE
     started = time.monotonic()
     try:
-        transcript = await transcriber.transcribe_url(url, max_duration, progress)
+        transcript = await transcriber.transcribe_url(url, max_duration, progress, priority)
     except transcriber.VideoTooLongError as e:
         limit_note = (
             "" if unlimited
