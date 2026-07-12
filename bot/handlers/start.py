@@ -10,25 +10,25 @@ from config import settings
 router = Router(name="start")
 
 WELCOME = (
-    "👋 Привет! Я превращаю видео в текст.\n\n"
-    "Пришли ссылку на видео из <b>YouTube</b>, <b>Instagram</b> или <b>TikTok</b> — "
-    "я распознаю речь и верну расшифровку с таймкодами:\n\n"
-    "<blockquote>🎬 <b>Название видео</b> · 0:49\n"
-    "<b>0:00</b>  Первые слова из видео…\n"
-    "<b>0:05</b>  Следующая фраза…\n"
-    "<b>0:12</b>  И так далее до конца.</blockquote>\n\n"
-    "⚡ Обычно это занимает меньше минуты — можно сразу присылать несколько ссылок. "
-    "Под каждой расшифровкой есть кнопки, чтобы скачать её файлом (.txt) "
-    "или субтитрами (.srt).\n\n"
-    "<b>Тарифы</b>\n"
-    f"🎁 {settings.free_video_limit} видео в неделю — бесплатно "
-    f"(до {settings.free_max_duration // 60} минут каждое)\n"
-    f"⭐ Подписка — {settings.subscription_stars} Stars в месяц: безлимит "
-    f"и видео до {settings.sub_max_duration // 3600} часов. Оформить: /subscribe\n\n"
-    "<b>Команды</b>\n"
-    "/status — остаток бесплатных видео и подписка\n"
-    "/subscribe — оформить подписку\n"
-    "/cancel — отключить продление подписки"
+    "👋 Hi! I turn videos into text.\n\n"
+    "Send me a link to a <b>YouTube</b>, <b>Instagram</b> or <b>TikTok</b> video — "
+    "I'll recognize the speech and reply with a timestamped transcript:\n\n"
+    "<blockquote>🎬 <b>Video title</b> · 0:49\n"
+    "<b>0:00</b>  The first words of the video…\n"
+    "<b>0:05</b>  The next phrase…\n"
+    "<b>0:12</b>  And so on until the end.</blockquote>\n\n"
+    "⚡ It usually takes less than a minute — feel free to send several links at once. "
+    "Every transcript comes with buttons to download it as a file (.txt) "
+    "or as subtitles (.srt).\n\n"
+    "<b>Pricing</b>\n"
+    f"🎁 {settings.free_video_limit} videos per week — free "
+    f"(up to {settings.free_max_duration // 60} minutes each)\n"
+    f"⭐ Subscription — {settings.subscription_stars} Stars per month: unlimited videos "
+    f"up to {settings.sub_max_duration // 3600} hours long. Subscribe: /subscribe\n\n"
+    "<b>Commands</b>\n"
+    "/status — free videos left and subscription info\n"
+    "/subscribe — get a subscription\n"
+    "/cancel — turn off subscription renewal"
 )
 
 
@@ -43,26 +43,26 @@ async def cmd_status(message: Message) -> None:
     user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
 
     if message.from_user.id in settings.free_user_id_set:
-        await message.answer("⭐ Для тебя всё бесплатно и без ограничений.")
+        await message.answer("⭐ Everything is free and unlimited for you.")
         return
 
     if db.has_active_subscription(user):
         until = user["subscription_until"].strftime("%d.%m.%Y")
         if user["cancel_at_period_end"]:
-            sub_line = f"⭐ Подписка активна до {until}, продление отключено (/subscribe — включить обратно)."
+            sub_line = f"⭐ Subscription active until {until}, renewal is off (/subscribe to turn it back on)."
         else:
-            sub_line = f"⭐ Подписка активна до {until}, продлится автоматически."
-        await message.answer(f"{sub_line}\nВидео — без ограничений. 🎉")
+            sub_line = f"⭐ Subscription active until {until}, renews automatically."
+        await message.answer(f"{sub_line}\nUnlimited videos. 🎉")
     else:
         used = user["free_videos_used"]
         left = max(settings.free_video_limit - used, 0)
         renew_line = ""
         if user["free_week_start"] is not None:
             renew_date = user["free_week_start"] + timedelta(days=7)
-            renew_line = f"Лимит обновится {renew_date.strftime('%d.%m.%Y')}.\n"
+            renew_line = f"The limit resets on {renew_date.strftime('%d.%m.%Y')}.\n"
         await message.answer(
-            f"🎁 На этой неделе использовано {used} из {settings.free_video_limit} "
-            f"бесплатных видео (осталось {left}).\n"
+            f"🎁 This week you've used {used} of {settings.free_video_limit} "
+            f"free videos ({left} left).\n"
             f"{renew_line}"
-            "⭐ Подписка не активна. Оформить: /subscribe"
+            "⭐ No active subscription. Subscribe: /subscribe"
         )

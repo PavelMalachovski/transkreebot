@@ -43,7 +43,7 @@ INSTA_ALERT_THRESHOLD = 3
 async def notify_restart(**kwargs) -> None:
     for status in list(_active_statuses):
         try:
-            await status.edit_text("♻️ Бот обновляется. Пришли ссылку ещё раз через минуту 🙏")
+            await status.edit_text("♻️ The bot is updating. Please send the link again in a minute 🙏")
         except Exception:
             pass
 
@@ -99,8 +99,8 @@ def to_srt(segments: list) -> str:
 
 def export_keyboard(url_hash: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📄 Скачать .txt", callback_data=f"exp:txt:{url_hash}"),
-        InlineKeyboardButton(text="🎬 Субтитры .srt", callback_data=f"exp:srt:{url_hash}"),
+        InlineKeyboardButton(text="📄 Download .txt", callback_data=f"exp:txt:{url_hash}"),
+        InlineKeyboardButton(text="🎬 Subtitles .srt", callback_data=f"exp:srt:{url_hash}"),
     ]])
 
 
@@ -127,8 +127,8 @@ async def _alert_admins_cookies(message: Message) -> None:
         try:
             await message.bot.send_message(
                 admin_id,
-                f"⚠️ {INSTA_ALERT_THRESHOLD} Instagram-скачивания подряд упали — "
-                "возможно, протухли cookies (YTDLP_COOKIES на Railway).",
+                f"⚠️ {INSTA_ALERT_THRESHOLD} Instagram downloads failed in a row — "
+                "the cookies may have expired (YTDLP_COOKIES on Railway).",
             )
         except Exception:
             logger.exception("Failed to alert admin %s", admin_id)
@@ -149,10 +149,10 @@ async def handle_url(message: Message) -> None:
         renew_note = ""
         if user["free_week_start"] is not None:
             renew_date = user["free_week_start"] + timedelta(days=7)
-            renew_note = f"Новые бесплатные видео — {renew_date.strftime('%d.%m.%Y')}. "
+            renew_note = f"New free videos on {renew_date.strftime('%d.%m.%Y')}. "
         await message.answer(
-            f"Недельный лимит ({settings.free_video_limit} видео) исчерпан. 😔\n"
-            f"{renew_note}Или оформи подписку и расшифровывай без ограничений: /subscribe"
+            f"You've reached the weekly free limit ({settings.free_video_limit} videos). 😔\n"
+            f"{renew_note}Or subscribe for unlimited transcriptions: /subscribe"
         )
         return
 
@@ -171,7 +171,7 @@ async def handle_url(message: Message) -> None:
         await _send_transcript(message, None, transcript, url_hash, user, unlimited)
         return
 
-    status = await message.answer("⬇️ Скачиваю видео...")
+    status = await message.answer("⬇️ Downloading the video...")
     _active_statuses.add(status)
 
     async def progress(text: str) -> None:
@@ -187,11 +187,11 @@ async def handle_url(message: Message) -> None:
     except transcriber.VideoTooLongError as e:
         limit_note = (
             "" if unlimited
-            else f"\nПо подписке лимит больше — {settings.sub_max_duration // 60} минут: /subscribe"
+            else f"\nSubscribers get a higher limit — {settings.sub_max_duration // 60} minutes: /subscribe"
         )
         await status.edit_text(
-            f"Это видео слишком длинное ({format_timestamp(e.duration)}). "
-            f"Максимум сейчас — {e.limit // 60} минут.{limit_note}"
+            f"This video is too long ({format_timestamp(e.duration)}). "
+            f"The current limit is {e.limit // 60} minutes.{limit_note}"
         )
         await db.log_request(message.from_user.id, url, "too_long", video_duration=e.duration)
         return
@@ -199,25 +199,25 @@ async def handle_url(message: Message) -> None:
         logger.exception("Download failed for %s (user %s)", url, message.from_user.id)
         if "DRM" in str(e):
             await status.edit_text(
-                "Это видео защищено DRM — скачать и расшифровать его нельзя. 😕"
+                "This video is DRM protected — it can't be downloaded and transcribed. 😕"
             )
         elif "Sign in to confirm" in str(e):
             await status.edit_text(
-                "YouTube не отдал это видео с первого раза (антибот-проверка). 😕\n"
-                "Попробуй прислать ссылку ещё раз через минуту-другую — часто срабатывает."
+                "YouTube didn't serve this video on the first try (anti-bot check). 😕\n"
+                "Send the link again in a minute or two — it usually works."
             )
         elif "status code 10240" in str(e):
             await status.edit_text(
-                "TikTok говорит, что это видео недоступно — оно удалено, приватное "
-                "или закрыто для региона сервера. 😕"
+                "TikTok says this video is unavailable — it was removed, is private, "
+                "or is blocked in the server's region. 😕"
             )
         else:
             await status.edit_text(
-                "Не получилось скачать это видео. 😕\n"
-                "Проверь, что ссылка рабочая, видео не приватное и не удалено, "
-                "и что это YouTube, Instagram или TikTok. "
-                "Возможно также, что в видео нет звуковой дорожки.\n"
-                "Instagram иногда блокирует скачивание — в таком случае попробуй позже."
+                "Couldn't download this video. 😕\n"
+                "Make sure the link works, the video isn't private or deleted, "
+                "and it's from YouTube, Instagram or TikTok. "
+                "It's also possible the video has no audio track.\n"
+                "Instagram sometimes blocks downloads — if so, try again later."
             )
         await db.log_request(message.from_user.id, url, "download_error")
         if "instagram.com" in url:
@@ -227,7 +227,7 @@ async def handle_url(message: Message) -> None:
         return
     except Exception:
         logger.exception("Transcription failed for %s (user %s)", url, message.from_user.id)
-        await status.edit_text("Что-то пошло не так при расшифровке. Попробуй ещё раз позже. 🙏")
+        await status.edit_text("Something went wrong during transcription. Please try again later. 🙏")
         await db.log_request(message.from_user.id, url, "error")
         return
     finally:
@@ -243,7 +243,7 @@ async def handle_url(message: Message) -> None:
     )
 
     if not transcript.segments:
-        await status.edit_text("В этом видео не нашлось речи — расшифровка пустая. 🤷")
+        await status.edit_text("No speech found in this video — the transcript is empty. 🤷")
         return
 
     await db.cache_transcript(
@@ -276,11 +276,11 @@ async def _send_transcript(
     if not unlimited:
         left = settings.free_video_limit - user["free_videos_used"] - 1
         if left > 0:
-            await message.answer(f"Осталось бесплатных видео на этой неделе: {left}.")
+            await message.answer(f"Free videos left this week: {left}.")
         else:
             await message.answer(
-                "Это было последнее бесплатное видео на этой неделе. "
-                "Безлимит — по подписке: /subscribe"
+                "That was your last free video this week. "
+                "Go unlimited with a subscription: /subscribe"
             )
 
 
@@ -289,7 +289,7 @@ async def export_transcript(callback: CallbackQuery) -> None:
     _, fmt, url_hash = callback.data.split(":", 2)
     row = await db.get_cached_transcript(url_hash)
     if row is None:
-        await callback.answer("Расшифровка не найдена, пришли ссылку ещё раз.", show_alert=True)
+        await callback.answer("Transcript not found — please send the link again.", show_alert=True)
         return
     segments = [tuple(seg) for seg in json.loads(row["segments"])]
     content = to_srt(segments) if fmt == "srt" else to_txt(segments)
@@ -301,5 +301,6 @@ async def export_transcript(callback: CallbackQuery) -> None:
 @router.message(F.text)
 async def handle_other_text(message: Message) -> None:
     await message.answer(
-        "Пришли мне ссылку на видео (YouTube, Instagram, TikTok) — верну текст с таймкодами."
+        "Send me a video link (YouTube, Instagram, TikTok) and I'll reply "
+        "with a timestamped transcript."
     )

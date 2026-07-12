@@ -30,7 +30,7 @@ async def cmd_subscribe(message: Message) -> None:
     if db.has_active_subscription(user):
         until = user["subscription_until"].strftime("%d.%m.%Y")
         if not user["cancel_at_period_end"]:
-            await message.answer(f"У тебя уже есть активная подписка до {until}. 🎉")
+            await message.answer(f"You already have an active subscription until {until}. 🎉")
             return
         # renewal was cancelled — try to switch it back on
         if user["telegram_charge_id"]:
@@ -41,7 +41,7 @@ async def cmd_subscribe(message: Message) -> None:
                     is_canceled=False,
                 )
                 await db.set_cancel_at_period_end(message.from_user.id, False)
-                await message.answer(f"Продление снова включено. Подписка активна до {until}. 🎉")
+                await message.answer(f"Renewal is back on. Subscription active until {until}. 🎉")
                 return
             except TelegramBadRequest as e:
                 logger.warning("Could not re-enable subscription renewal: %s", e.message)
@@ -51,32 +51,32 @@ async def cmd_subscribe(message: Message) -> None:
     # subscription_period fails with SUBSCRIPTION_EXPORT_MISSING)
     try:
         link = await message.bot.create_invoice_link(
-            title="Подписка Transkreebot — 1 месяц",
+            title="Transkreebot subscription — 1 month",
             description=(
-                "Безлимитная расшифровка видео до 2 часов длиной. "
-                "Продлевается автоматически, отменить можно в любой момент."
+                "Unlimited transcription of videos up to 2 hours long. "
+                "Renews automatically, cancel anytime."
             ),
             payload=SUBSCRIPTION_PAYLOAD,
             currency="XTR",  # Telegram Stars
-            prices=[LabeledPrice(label="Подписка на месяц", amount=settings.subscription_stars)],
+            prices=[LabeledPrice(label="Monthly subscription", amount=settings.subscription_stars)],
             subscription_period=MONTH_SECONDS,
         )
     except TelegramBadRequest as e:
         logger.error("Failed to create subscription invoice link: %s", e.message)
-        await message.answer("Оплата временно недоступна, попробуй позже. 🙏")
+        await message.answer("Payments are temporarily unavailable, please try again later. 🙏")
         return
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text=f"Оформить за {settings.subscription_stars} ⭐ в месяц", url=link
+            text=f"Subscribe for {settings.subscription_stars} ⭐ / month", url=link
         )
     ]])
     await message.answer(
-        "⭐ <b>Подписка Transkreebot</b>\n\n"
-        f"Безлимитная расшифровка видео до {settings.sub_max_duration // 3600} часов длиной, "
-        "приоритет в очереди.\n"
-        f"{settings.subscription_stars} Stars в месяц, продлевается автоматически — "
-        "отменить можно в любой момент командой /cancel.",
+        "⭐ <b>Transkreebot subscription</b>\n\n"
+        f"Unlimited transcription of videos up to {settings.sub_max_duration // 3600} hours long, "
+        "priority in the queue.\n"
+        f"{settings.subscription_stars} Stars per month, renews automatically — "
+        "cancel anytime with /cancel.",
         parse_mode="HTML",
         reply_markup=keyboard,
     )
@@ -111,12 +111,12 @@ async def successful_payment(message: Message) -> None:
 
     renewal = payment.is_recurring and not payment.is_first_recurring
     if renewal:
-        await message.answer(f"Подписка продлена до {until.strftime('%d.%m.%Y')}. Спасибо! 🎉")
+        await message.answer(f"Subscription renewed until {until.strftime('%d.%m.%Y')}. Thank you! 🎉")
     else:
         await message.answer(
-            f"Оплата прошла успешно! 🎉\n"
-            f"Подписка активна до {until.strftime('%d.%m.%Y')} и продлится автоматически. "
-            "Присылай ссылки — расшифрую без ограничений. Отмена: /cancel"
+            f"Payment successful! 🎉\n"
+            f"Your subscription is active until {until.strftime('%d.%m.%Y')} and renews "
+            "automatically. Send me links — unlimited transcriptions await. Cancel: /cancel"
         )
 
 
@@ -125,12 +125,12 @@ async def cmd_cancel(message: Message) -> None:
     user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
 
     if not db.has_active_subscription(user):
-        await message.answer("У тебя нет активной подписки. Оформить: /subscribe")
+        await message.answer("You don't have an active subscription. Subscribe: /subscribe")
         return
 
     until = user["subscription_until"].strftime("%d.%m.%Y")
     if user["cancel_at_period_end"]:
-        await message.answer(f"Продление уже отключено. Подписка действует до {until}.")
+        await message.answer(f"Renewal is already off. Your subscription lasts until {until}.")
         return
 
     if user["telegram_charge_id"]:
@@ -147,5 +147,5 @@ async def cmd_cancel(message: Message) -> None:
 
     await db.set_cancel_at_period_end(message.from_user.id, True)
     await message.answer(
-        f"Подписка останется активной до {until}, дальше продлеваться не будет."
+        f"Your subscription stays active until {until}, then won't renew."
     )

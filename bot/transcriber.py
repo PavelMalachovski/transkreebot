@@ -159,16 +159,16 @@ async def transcribe_url(
     queue_size += 1
     try:
         if progress and ahead:
-            await progress(f"⏳ В очереди — впереди видео: {ahead}. Начну, как только освобожусь...")
+            await progress(f"⏳ Queued — {ahead} video(s) ahead of you. Starting as soon as I'm free...")
         path, info = await loop.run_in_executor(_executor, _download, url, file_id, max_duration)
         logger.info("Downloaded %s -> %s", url, path.name)
         duration = int(info.get("duration") or 0)
         if progress:
             note = f" ({duration // 60}:{duration % 60:02d})" if duration else ""
-            await progress(f"🎙 Расшифровываю{note}...")
+            await progress(f"🎙 Transcribing{note}...")
         segments = await loop.run_in_executor(_executor, _transcribe_file, path)
         return Transcript(
-            title=info.get("title") or "Видео",
+            title=info.get("title") or "Video",
             duration=duration,
             segments=segments,
         )

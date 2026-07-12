@@ -13,13 +13,13 @@ async def cmd_stats(message: Message) -> None:
     s = await db.get_stats()
     avg = f"{s['avg_processing']}s" if s["avg_processing"] is not None else "—"
     await message.answer(
-        "📊 <b>Статистика</b>\n\n"
-        f"👥 Пользователей: {s['users_total']} (+{s['users_7d']} за 7 дней)\n"
-        f"💳 Активных подписок: {s['subs_active']}\n\n"
-        f"🎬 Запросов всего: {s['requests_total']}\n"
-        f"— за 24 часа: {s['requests_24h']}\n"
-        f"— ошибок за 24 часа: {s['errors_24h']}\n"
-        f"⏱ Среднее время обработки: {avg}\n"
-        f"🗃 Расшифровок в кэше: {s['cached_total']}",
+        "📊 <b>Stats</b>\n\n"
+        f"👥 Users: {s['users_total']} (+{s['users_7d']} in 7 days)\n"
+        f"💳 Active subscriptions: {s['subs_active']}\n\n"
+        f"🎬 Requests total: {s['requests_total']}\n"
+        f"— last 24h: {s['requests_24h']}\n"
+        f"— errors last 24h: {s['errors_24h']}\n"
+        f"⏱ Avg processing time: {avg}\n"
+        f"🗃 Cached transcripts: {s['cached_total']}",
         parse_mode="HTML",
     )
