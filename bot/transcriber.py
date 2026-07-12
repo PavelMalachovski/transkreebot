@@ -86,6 +86,8 @@ def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, d
         "quiet": True,
         "no_warnings": True,
         "max_filesize": 500 * 1024 * 1024,
+        # YouTube's bot checks are flaky — a retry often gets through
+        "extractor_retries": 3,
         # always hand whisper a clean audio file; fails loudly here (instead
         # of deep inside whisper's decoder) when the video has no sound
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],

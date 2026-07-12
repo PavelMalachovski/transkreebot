@@ -201,6 +201,16 @@ async def handle_url(message: Message) -> None:
             await status.edit_text(
                 "Это видео защищено DRM — скачать и расшифровать его нельзя. 😕"
             )
+        elif "Sign in to confirm" in str(e):
+            await status.edit_text(
+                "YouTube не отдал это видео с первого раза (антибот-проверка). 😕\n"
+                "Попробуй прислать ссылку ещё раз через минуту-другую — часто срабатывает."
+            )
+        elif "status code 10240" in str(e):
+            await status.edit_text(
+                "TikTok говорит, что это видео недоступно — оно удалено, приватное "
+                "или закрыто для региона сервера. 😕"
+            )
         else:
             await status.edit_text(
                 "Не получилось скачать это видео. 😕\n"
