@@ -18,6 +18,7 @@ WELCOME = (
     "<b>0:05</b>  The next phrase…\n"
     "<b>0:12</b>  And so on until the end.</blockquote>\n\n"
     "⚡ It usually takes less than a minute — feel free to send several links at once. "
+    "Voice messages, video notes and audio files work too — just forward them to me. "
     "Every transcript comes with buttons to download it as a file (.txt) "
     "or as subtitles (.srt).\n\n"
     "<b>Pricing</b>\n"

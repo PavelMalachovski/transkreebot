@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from datetime import timedelta
 from urllib.parse import urlsplit, urlunsplit
 
@@ -330,6 +331,127 @@ async def _send_transcript(
             )
 
 
+# Telegram's getFile API refuses files above 20 MB for bots
+MAX_TG_FILE_SIZE = 20 * 1024 * 1024
+
+
+def _media_info(message: Message):
+    """Returns (media, title, duration_seconds) or (None, "", 0)."""
+    if message.voice:
+        return message.voice, "Voice message", message.voice.duration
+    if message.audio:
+        title = message.audio.title or message.audio.file_name or "Audio"
+        return message.audio, title, message.audio.duration
+    if message.video_note:
+        return message.video_note, "Video message", message.video_note.duration
+    if message.video:
+        return message.video, message.video.file_name or "Video", message.video.duration
+    return None, "", 0
+
+
+@router.message(F.voice | F.audio | F.video_note | F.video)
+async def handle_media(message: Message) -> None:
+    media, title, duration = _media_info(message)
+    if media is None:
+        return
+    duration = duration or 0
+    user = await db.get_or_create_user(message.from_user.id, message.from_user.username)
+
+    unlimited, allowed = await _check_quota(message, user)
+    if not allowed:
+        return
+
+    # forwards of the same file hit the cache via its stable unique id
+    url = f"tg://{media.file_unique_id}"
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:32]
+    cached = await db.get_cached_transcript(url_hash)
+    if cached is not None:
+        transcript = transcriber.Transcript(
+            title=cached["title"],
+            duration=cached["duration"],
+            segments=[tuple(seg) for seg in json.loads(cached["segments"])],
+        )
+        await db.log_request(
+            message.from_user.id, url, "cached", video_duration=transcript.duration
+        )
+        await _send_transcript(message, None, transcript, url_hash, user, unlimited)
+        return
+
+    max_duration = settings.sub_max_duration if unlimited else settings.free_max_duration
+    if duration > max_duration:
+        limit_note = (
+            "" if unlimited
+            else f"\nSubscribers get a higher limit — {settings.sub_max_duration // 60} minutes: /subscribe"
+        )
+        await message.answer(
+            f"This recording is too long ({format_timestamp(duration)}). "
+            f"The current limit is {max_duration // 60} minutes.{limit_note}"
+        )
+        return
+    if media.file_size and media.file_size > MAX_TG_FILE_SIZE:
+        await message.answer(
+            "This file is larger than 20 MB — Telegram doesn't let bots download "
+            "files that big. 😕 If it's a video, try sending a link instead."
+        )
+        return
+
+    if _too_many_jobs(message.from_user.id):
+        await message.answer(
+            f"You already have {MAX_USER_JOBS} jobs processing — "
+            "please wait for them to finish. 🙏"
+        )
+        return
+
+    _job_started(message.from_user.id)
+    try:
+        await _process_media(message, user, unlimited, media, title, duration, url, url_hash)
+    finally:
+        _job_finished(message.from_user.id)
+
+
+async def _process_media(
+    message: Message, user, unlimited: bool, media, title: str,
+    duration: int, url: str, url_hash: str,
+) -> None:
+    status = await message.answer("⬇️ Downloading the file...")
+    _active_statuses.add(status)
+
+    async def progress(text: str) -> None:
+        try:
+            await status.edit_text(text)
+        except TelegramBadRequest:
+            pass
+
+    priority = transcriber.PRIORITY_SUBSCRIBER if unlimited else transcriber.PRIORITY_FREE
+    path = transcriber.TMP_DIR / f"{uuid.uuid4().hex}.media"
+    started = time.monotonic()
+    try:
+        await message.bot.download(media, destination=str(path))
+        segments = await transcriber.transcribe_local(path, duration, progress, priority)
+    except Exception:
+        logger.exception("Media transcription failed (user %s)", message.from_user.id)
+        await status.edit_text("Something went wrong during transcription. Please try again later. 🙏")
+        await db.log_request(message.from_user.id, url, "error")
+        return
+    finally:
+        _active_statuses.discard(status)
+        path.unlink(missing_ok=True)
+
+    elapsed = time.monotonic() - started
+    await db.log_request(
+        message.from_user.id, url, "ok",
+        video_duration=duration, processing_seconds=elapsed,
+    )
+
+    if not segments:
+        await status.edit_text("No speech found in this recording — the transcript is empty. 🤷")
+        return
+
+    transcript = transcriber.Transcript(title=title, duration=duration, segments=segments)
+    await db.cache_transcript(url_hash, url, title, duration, segments)
+    await _send_transcript(message, status, transcript, url_hash, user, unlimited)
+
+
 @router.callback_query(F.data.startswith("exp:"))
 async def export_transcript(callback: CallbackQuery) -> None:
     _, fmt, url_hash = callback.data.split(":", 2)
@@ -347,6 +469,6 @@ async def export_transcript(callback: CallbackQuery) -> None:
 @router.message(F.text)
 async def handle_other_text(message: Message) -> None:
     await message.answer(
-        "Send me a video link (YouTube, Instagram, TikTok) and I'll reply "
-        "with a timestamped transcript."
+        "Send me a video link (YouTube, Instagram, TikTok), a voice message "
+        "or an audio file — I'll reply with a timestamped transcript."
     )
