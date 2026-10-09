@@ -4,6 +4,7 @@ import binascii
 import heapq
 import itertools
 import logging
+import subprocess
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -131,12 +132,17 @@ def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, d
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
         # with cookies + the PO token provider (see Dockerfile) yt-dlp's
         # default client selection works best, so no player_client override
+        # YouTube needs a JS runtime to solve its player challenges; yt-dlp
+        # only enables deno by default, the image ships node
+        "js_runtimes": {"node": {}},
     }
     if settings.proxy_url:
         opts["proxy"] = settings.proxy_url
     if max_duration:
-        # rejects during extraction, before any bytes are downloaded
-        opts["match_filter"] = yt_dlp.utils.match_filter_func(f"duration <= {max_duration}")
+        # rejects during extraction, before any bytes are downloaded. "<=?"
+        # lets videos with unknown duration through (Instagram often omits
+        # it) — a plain "<=" silently skips them; they're checked after download
+        opts["match_filter"] = yt_dlp.utils.match_filter_func(f"duration <=? {max_duration}")
     cookies = _cookie_file()
     if cookies:
         opts["cookiefile"] = cookies
@@ -158,7 +164,24 @@ def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, d
         raise DownloadError("Download finished but no media file was produced")
     # prefer the extracted audio if the original somehow survived alongside it
     files.sort(key=lambda f: f.suffix != ".m4a")
-    return files[0], info
+    path = files[0]
+    if not info.get("duration"):
+        info["duration"] = _probe_duration(path)
+        if max_duration and info["duration"] > max_duration:
+            raise VideoTooLongError(info["duration"], max_duration)
+    return path, info
+
+
+def _probe_duration(path: Path) -> int:
+    """Media duration in seconds via ffprobe, 0 if it can't be determined."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout
+        return int(float(out.strip()))
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return 0
 
 
 def _transcribe_file(path: Path) -> list[tuple[float, float, str]]:
