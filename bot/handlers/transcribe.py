@@ -253,6 +253,10 @@ async def _process_url(
                 "YouTube didn't serve this video on the first try (anti-bot check). 😕\n"
                 "Send the link again in a minute or two — it usually works."
             )
+        elif "Live streams" in str(e):
+            await status.edit_text(
+                "This is a live stream — I can transcribe it once the broadcast is over. 📡"
+            )
         elif "status code 10240" in str(e):
             await status.edit_text(
                 "TikTok says this video is unavailable — it was removed, is private, "

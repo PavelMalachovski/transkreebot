@@ -138,11 +138,15 @@ def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, d
     }
     if settings.proxy_url:
         opts["proxy"] = settings.proxy_url
+    # filters reject during extraction, before any bytes are downloaded.
+    # A live stream has no duration and would be recorded until it ends,
+    # holding the only worker slot all that time.
+    filters = ["!is_live"]
     if max_duration:
-        # rejects during extraction, before any bytes are downloaded. "<=?"
-        # lets videos with unknown duration through (Instagram often omits
-        # it) — a plain "<=" silently skips them; they're checked after download
-        opts["match_filter"] = yt_dlp.utils.match_filter_func(f"duration <=? {max_duration}")
+        # "<=?" lets videos with unknown duration through (Instagram often
+        # omits it) — a plain "<=" silently skips them; they're checked after download
+        filters.append(f"duration <=? {max_duration}")
+    opts["match_filter"] = yt_dlp.utils.match_filter_func(" & ".join(filters))
     cookies = _cookie_file()
     if cookies:
         opts["cookiefile"] = cookies
@@ -158,6 +162,8 @@ def _download(url: str, file_id: str, max_duration: int | None) -> tuple[Path, d
     info = info or {}
     files = list(TMP_DIR.glob(f"{file_id}.*"))
     if not files:
+        if info.get("is_live"):
+            raise DownloadError("Live streams can't be transcribed")
         duration = int(info.get("duration") or 0)
         if max_duration and duration > max_duration:
             raise VideoTooLongError(duration, max_duration)
